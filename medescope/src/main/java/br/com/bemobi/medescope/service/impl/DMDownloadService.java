@@ -2,8 +2,8 @@ package br.com.bemobi.medescope.service.impl;
 
 import android.app.DownloadManager;
 import android.content.Context;
+import android.content.pm.PackageManager;
 import android.database.Cursor;
-import android.database.DatabaseUtils;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
@@ -27,6 +27,10 @@ import static br.com.bemobi.medescope.constant.DownloadConstants.LOG_FEATURE_DOW
 public class DMDownloadService implements DownloadService {
 
     private static final String TAG = DMDownloadService.class.getSimpleName();
+
+    private static final String PACKAGE_DOWNLOAD_MANAGER = "com.android.providers.downloads";
+    private static final String PACKAGE_DOWNLOAD_MANAGER_UI = "com.android.providers.downloads.ui";
+
     private static DMDownloadService instance;
     private static DownloadManager downloadManager;
     private DMRepository repository;
@@ -62,6 +66,9 @@ public class DMDownloadService implements DownloadService {
 
     @Override
     public boolean enqueue(String downloadId, String uri, String fileName, String title, String description, String data, boolean shouldDownloadOnlyInWifi, Map<String, String> customHeaders) {
+        if( isDownloadManagerDeactivated(mContext) ){
+            return false;
+        }
         if (DownloadFileUtils.isExternalStorageWritable()) {
             DownloadManager.Request request;
             request = new DownloadManager.Request(Uri.parse(uri));
@@ -74,16 +81,11 @@ public class DMDownloadService implements DownloadService {
             if (customHeaders != null && !customHeaders.isEmpty()) {
                 // TODO setar variavel no build para logar somente em debug http://toastdroid.com/2014/03/28/customizing-your-build-with-gradle/
 
-                //LogUtil.debug(TAG, LOG_FEATURE_DOWNLOAD, ">>>>>>>>>>> LOGGING CUSTOM HEADERS");
-                //new MapLogger(LOG_FEATURE_DOWNLOAD).log(customHeaders);
-
-
                 for (String key : customHeaders.keySet()) {
                     request.addRequestHeader(key, customHeaders.get(key));
                 }
             }
 
-//        request.allowScanningByMediaScanner();
             request = setHiddenDownload(request);
             Long dmId = getDMInstance(mContext).enqueue(request);
             repository.persistIds(downloadId, dmId);
@@ -91,6 +93,42 @@ public class DMDownloadService implements DownloadService {
         }
 
         return false;
+    }
+
+    @Override
+    public boolean isDownloadManagerUiActivated() {
+        return !this.isDownloadManagerUiDeactivated();
+    }
+
+    @Override
+    public boolean isDownloadManagerUiDeactivated(){
+        try {
+            int state = mContext.getPackageManager().getApplicationEnabledSetting(PACKAGE_DOWNLOAD_MANAGER_UI);
+            return this.isDisabledState(state);
+        } catch (IllegalArgumentException e) {
+            return true;
+        }
+    }
+
+    @Override
+    public boolean isDownloadManagerActivated() {
+        return !this.isDownloadManagerDeactivated(mContext);
+    }
+
+    @Override
+    public boolean isDownloadManagerDeactivated(Context context) {
+        try {
+            int state = context.getPackageManager().getApplicationEnabledSetting(PACKAGE_DOWNLOAD_MANAGER);
+            return this.isDisabledState(state);
+        } catch (IllegalArgumentException e) {
+            return true;
+        }
+    }
+
+    private boolean isDisabledState(int state) {
+        return state == PackageManager.COMPONENT_ENABLED_STATE_DISABLED ||
+                state == PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER ||
+                state == PackageManager.COMPONENT_ENABLED_STATE_DISABLED_UNTIL_USED;
     }
 
     private void setAllowedNetworks(boolean shouldDownloadOnlyInWifi, DownloadManager.Request request) {
@@ -145,9 +183,6 @@ public class DMDownloadService implements DownloadService {
                 int progress = 0;
 
                 if (cursor.moveToFirst()) {
-                    // TODO desligar esse log em producao
-                    Logger.debug(TAG, LOG_FEATURE_DOWNLOAD, "dumpCursorToString\n" + DatabaseUtils.dumpCursorToString(cursor));
-
 
                     //column for status
                     int columnIndex = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS);
@@ -159,21 +194,16 @@ public class DMDownloadService implements DownloadService {
 
                     //get the download filename
                     filename = "";
-                    if (android.os.Build.VERSION.SDK_INT >= Build.VERSION_CODES.HONEYCOMB) {
-                        int filenameIndex = cursor.getColumnIndex(DownloadManager.COLUMN_LOCAL_FILENAME);
-                        filename = cursor.getString(filenameIndex);
-                    } else {
-                        int filenameIndex = cursor.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI);
-                        String cursorString = cursor.getString(filenameIndex);
+                    int filenameIndex = cursor.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI);
+                    String cursorString = cursor.getString(filenameIndex);
 
-                        if (cursorString != null) {
-                            Logger.debug(TAG, LOG_FEATURE_DOWNLOAD, "                     [ cursor.getString(filenameIndex) ] = " + cursor.getString(filenameIndex));
-                            Uri uri = Uri.parse(cursorString);
+                    if (cursorString != null) {
+                        Logger.debug(TAG, LOG_FEATURE_DOWNLOAD, "                     [ cursor.getString(filenameIndex) ] = " + cursor.getString(filenameIndex));
+                        Uri uri = Uri.parse(cursorString);
 
-                            if (uri != null) {
-                                Logger.debug(TAG, LOG_FEATURE_DOWNLOAD, "[ Uri.parse(cursor.getString(filenameIndex)).getPath() ] = " + Uri.parse(cursor.getString(filenameIndex)).getPath());
-                                filename = uri.getPath();
-                            }
+                        if (uri != null) {
+                            Logger.debug(TAG, LOG_FEATURE_DOWNLOAD, "[ Uri.parse(cursor.getString(filenameIndex)).getPath() ] = " + Uri.parse(cursor.getString(filenameIndex)).getPath());
+                            filename = uri.getPath();
                         }
                     }
 

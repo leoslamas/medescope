@@ -276,18 +276,21 @@ public class DownloadCommandService extends Service implements DownloadCommand {
     @Override
     public void finishAction(String downloadId, DownloadInfo downloadInfo) {
         Logger.debug(TAG, DownloadConstants.LOG_FEATURE_DOWNLOAD, "Finish Action");
+        String downloadData = downloadDataRepository.getDownloadData(downloadId);
+
+        downloadDataRepository.removeDownloadData(downloadId);
+        downloadService.cleanupId(downloadId);
+
         if (downloadInfo != null) {
             if (downloadInfo.hasFinishedWithSuccess()) {
-                communicationService.sendFinishWithSuccessBroadcastData(downloadId, downloadInfo.getFilename(), downloadDataRepository.getDownloadData(downloadId));
+                communicationService.sendFinishWithSuccessBroadcastData(downloadId, downloadInfo.getFilename(), downloadData);
             } else if (downloadInfo.hasFinishedWithError()) {
-                communicationService.sendFinishWithErrorBroadcastData(downloadId, downloadInfo.getReason(), downloadDataRepository.getDownloadData(downloadId));
+                communicationService.sendFinishWithErrorBroadcastData(downloadId, downloadInfo.getReason(), downloadData);
             }
         } else {
             Logger.debug(TAG, DownloadConstants.LOG_FEATURE_DOWNLOAD, "Cancelled");
             communicationService.sendCancelled(downloadId);
         }
-        downloadDataRepository.removeDownloadData(downloadId);
-        downloadService.cleanupId(downloadId);
     }
 
     @Override
@@ -332,17 +335,22 @@ public class DownloadCommandService extends Service implements DownloadCommand {
             Logger.debug(TAG, LOG_FEATURE_SERVICE_LIFECYCLE, "ServiceHandler.handleMessage()");
             DownloadInfo lastSentDownloadInfo = null;
 
+            if (!downloadDataRepository.containsDownloadDataKey(downloadIdRegisteredToSendProgress)) {
+                communicationService.sendDownloadStatusNotEnqueue(downloadIdRegisteredToSendProgress);
+                isStartedSendProgress = false;
+            }
+
+            DownloadInfo downloadInfo = downloadService.getDownloadInfo(downloadIdRegisteredToSendProgress);
+            if (downloadInfo == null) {
+                communicationService.sendDownloadStatusNotEnqueue(downloadIdRegisteredToSendProgress);
+                isStartedSendProgress = false;
+            }
+
             while (!TextUtils.isEmpty(downloadIdRegisteredToSendProgress) && isStartedSendProgress) {
                 try {
-                    if (!downloadDataRepository.containsDownloadDataKey(downloadIdRegisteredToSendProgress)) {
-                        communicationService.sendDownloadStatusNotEnqueue(downloadIdRegisteredToSendProgress);
-                        isStartedSendProgress = false;
-                        break;
-                    }
 
-                    DownloadInfo downloadInfo = downloadService.getDownloadInfo(downloadIdRegisteredToSendProgress);
-                    if (downloadInfo == null) {
-                        communicationService.sendDownloadStatusNotEnqueue(downloadIdRegisteredToSendProgress);
+                    if (downloadInfo == null
+                            || !downloadDataRepository.containsDownloadDataKey(downloadIdRegisteredToSendProgress)) {
                         isStartedSendProgress = false;
                         break;
                     }
@@ -365,6 +373,8 @@ public class DownloadCommandService extends Service implements DownloadCommand {
                     lastSentDownloadInfo = downloadInfo;
 
                     Thread.sleep(300);
+
+                    downloadInfo = downloadService.getDownloadInfo(downloadIdRegisteredToSendProgress);
 
                 } catch (InterruptedException exception) {
                     Logger.error(TAG, DownloadConstants.LOG_FEATURE_DOWNLOAD_SEND_PROGRESS, "ERROR ON THREAD STATUS SENDER!!!!");
